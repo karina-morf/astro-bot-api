@@ -39,3 +39,7 @@ async def generate_astrology_report(request: Request):
     except Exception as e:
         # У разі помилки повертаємо повідомлення про неї
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
+
+@app.get("/")
+async def root():
+    return {"message": "Привіт! Сервер астро-бота успішно працює 🚀"}
