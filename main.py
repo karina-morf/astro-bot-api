@@ -2,10 +2,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import json
 from geopy.geocoders import Nominatim
-from flatlib.datetime import Datetime
-from flatlib.geopos import GeoPos
-from flatlib.chart import Chart
-from flatlib import const
+import swisseph as swe
+from datetime import datetime
 
 app = FastAPI()
 
@@ -19,6 +17,56 @@ SYSTEM_PROMPT = """
 НІКОЛИ не вигадуй положення планет. Використовуй Markdown.
 """
 
+SIGNS = ["Aries","Taurus","Gemini","Cancer","Leo","Virgo",
+         "Libra","Scorpio","Sagittarius","Capricorn","Aquarius","Pisces"]
+
+def get_sign(degree):
+    return SIGNS[int(degree / 30)]
+
+def get_house_number(degree, houses):
+    for i in range(12):
+        start = houses[i]
+        end = houses[(i + 1) % 12]
+        if start <= end:
+            if start <= degree < end:
+                return i + 1
+        else:
+            if degree >= start or degree < end:
+                return i + 1
+    return 1
+
+def calculate_chart(birth_date, birth_time, lat, lon):
+    day, month, year = birth_date.split(".")
+    hour, minute = birth_time.split(":")
+    
+    dt = datetime(int(year), int(month), int(day), int(hour), int(minute))
+    jd = swe.julday(dt.year, dt.month, dt.day, dt.hour + dt.minute/60.0)
+    
+    houses_data, ascmc = swe.houses(jd, lat, lon, b'P')
+    asc_degree = ascmc[0]
+    
+    planets = {
+        "sun": swe.SUN,
+        "moon": swe.MOON,
+        "mercury": swe.MERCURY,
+        "venus": swe.VENUS,
+        "mars": swe.MARS,
+        "jupiter": swe.JUPITER,
+        "saturn": swe.SATURN,
+    }
+    
+    result = {"ascendant": {"sign": get_sign(asc_degree)}}
+    
+    for name, planet_id in planets.items():
+        pos, _ = swe.calc_ut(jd, planet_id)
+        degree = pos[0]
+        result[name] = {
+            "sign": get_sign(degree),
+            "house": get_house_number(degree, list(houses_data))
+        }
+    
+    return result
+
 @app.get("/")
 async def root():
     return {"message": "Астро-бот API працює 🚀"}
@@ -31,53 +79,20 @@ async def generate_astrology_report(request: Request):
         report_type = user_request.get("report_type", "free")
         client_name = user_request.get("client_name", "Клієнт")
         
-        # Якщо передані сирі дані (дата/час/місто) — розраховуємо карту
         if "birth_date" in user_request:
-            birth_date = user_request.get("birth_date")  # ДД.ММ.РРРР
-            birth_time = user_request.get("birth_time", "12:00")  # ГГ:ХХ
+            birth_date = user_request.get("birth_date")
+            birth_time = user_request.get("birth_time", "12:00")
             birth_city = user_request.get("birth_city", "")
             birth_country = user_request.get("birth_country", "")
 
-            # Отримуємо координати міста
             geolocator = Nominatim(user_agent="astro-bot")
             location = geolocator.geocode(f"{birth_city}, {birth_country}")
             
             if not location:
                 return JSONResponse(content={"status": "error", "message": "Місто не знайдено"}, status_code=400)
             
-            lat = location.latitude
-            lon = location.longitude
-
-            # Парсимо дату і час
-            day, month, year = birth_date.split(".")
-            hour, minute = birth_time.split(":")
-            
-            # Розраховуємо натальну карту
-            date = Datetime(f"{year}/{month}/{day}", f"{hour}:{minute}", "+00:00")
-            pos = GeoPos(lat, lon)
-            chart = Chart(date, pos)
-
-            sun = chart.get(const.SUN)
-            moon = chart.get(const.MOON)
-            asc = chart.get(const.ASC)
-            mercury = chart.get(const.MERCURY)
-            venus = chart.get(const.VENUS)
-            mars = chart.get(const.MARS)
-            jupiter = chart.get(const.JUPITER)
-            saturn = chart.get(const.SATURN)
-
-            astro_data = {
-                "sun": {"sign": sun.sign, "house": sun.house},
-                "moon": {"sign": moon.sign, "house": moon.house},
-                "ascendant": {"sign": asc.sign},
-                "mercury": {"sign": mercury.sign, "house": mercury.house},
-                "venus": {"sign": venus.sign, "house": venus.house},
-                "mars": {"sign": mars.sign, "house": mars.house},
-                "jupiter": {"sign": jupiter.sign, "house": jupiter.house},
-                "saturn": {"sign": saturn.sign, "house": saturn.house},
-            }
+            astro_data = calculate_chart(birth_date, birth_time, location.latitude, location.longitude)
         else:
-            # Якщо передані готові дані напряму
             astro_data = user_request.get("data", {})
 
         user_message = (
