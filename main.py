@@ -4,6 +4,8 @@ import json
 from geopy.geocoders import Nominatim
 import swisseph as swe
 from datetime import datetime
+from timezonefinder import TimezoneFinder
+import pytz
 
 app = FastAPI()
 
@@ -39,8 +41,23 @@ def calculate_chart(birth_date, birth_time, lat, lon):
     day, month, year = birth_date.split(".")
     hour, minute = birth_time.split(":")
     
-    dt = datetime(int(year), int(month), int(day), int(hour), int(minute))
-    jd = swe.julday(dt.year, dt.month, dt.day, dt.hour + dt.minute/60.0)
+    # 1. Знаходимо часовий пояс за координатами міста
+    tf = TimezoneFinder()
+    timezone_str = tf.timezone_at(lng=lon, lat=lat)
+    if timezone_str is None:
+        timezone_str = "UTC" # Запасний варіант
+        
+    local_tz = pytz.timezone(timezone_str)
+    
+    # 2. Створюємо локальний час народження
+    local_dt = datetime(int(year), int(month), int(day), int(hour), int(minute))
+    local_aware_dt = local_tz.localize(local_dt)
+    
+    # 3. Конвертуємо час в UTC для точних розрахунків
+    utc_dt = local_aware_dt.astimezone(pytz.utc)
+    
+    # 4. Використовуємо UTC час для julday
+    jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, utc_dt.hour + utc_dt.minute/60.0)
     
     houses_data, ascmc = swe.houses(jd, lat, lon, b'P')
     asc_degree = ascmc[0]
