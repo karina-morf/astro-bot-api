@@ -2,3 +2,5 @@ fastapi
 uvicorn
 geopy
 pyswisseph
+timezonefinder
+pytz
